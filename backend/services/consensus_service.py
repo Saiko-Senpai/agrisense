@@ -1,57 +1,71 @@
 """
-services/consensus_service.py — Consensus AI arbitration service.
+services/consensus_service.py — External Research API consensus service.
 
-Only triggered when Gemini and Qwen produce conflicting diagnoses.
+Triggered ONLY when Gemini (primary) and Qwen (secondary) disagree
+on the disease diagnosis.
 
-The consensus model (configurable — defaults to Gemini 1.5 Pro) acts as a
-senior research scientist, evaluating both diagnoses and providing a
-scientifically validated final determination with research-backed reasoning.
+The consensus service calls an external, research-backed plant disease
+database/API to obtain an authoritative, scientifically validated result.
+
+Configuration (via .env):
+    CONSENSUS_API_URL   — The base URL of the research API endpoint
+    CONSENSUS_API_KEY   — Bearer token / API key for authentication
+
+The external API is expected to receive a POST request with:
+    {
+        "gemini_diagnosis": { ...structured diagnosis dict... },
+        "qwen_diagnosis":   { ...structured diagnosis dict... }
+    }
+
+And return a JSON response with the validated diagnosis fields:
+    {
+        "disease_name": "...",
+        "pathogen": "...",
+        "confidence": 0-100,
+        "stage": "...",
+        "description": "...",
+        "treatment": [...],
+        "prevention": [...]
+    }
+
+If the external API does not match this schema exactly, the response
+is passed through the standard parser/validator for normalization.
 """
 
-import asyncio
 import logging
 import os
 from typing import Any
 
-import google.generativeai as genai
+import httpx
 
 from utils.parser import extract_json, validate_diagnosis
-from utils.prompts import build_consensus_prompt
 
 logger = logging.getLogger("agrisense.services.consensus")
+
+TIMEOUT_SECONDS = 30
 
 
 class ConsensusService:
     """
-    Uses an LLM to arbitrate between conflicting VLM diagnoses.
+    Calls an external plant disease research API to arbitrate between
+    conflicting Gemini and Qwen diagnoses.
 
-    The consensus model receives both diagnoses and is instructed to:
-    - Reason scientifically about which is more plausible
-    - Merge similar diagnoses (e.g. "Early Blight" vs "Alternaria Blight")
-    - Provide a fully validated treatment and prevention plan
-    - Include a brief reasoning explanation
+    The external API acts as a scientific ground-truth source, providing
+    research-validated disease identification results.
     """
 
     def __init__(self) -> None:
-        api_key = os.getenv("CONSENSUS_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if not api_key:
+        self._api_url = os.getenv("CONSENSUS_API_URL", "").rstrip("/")
+        self._api_key = os.getenv("CONSENSUS_API_KEY", "")
+
+        if not self._api_url:
             logger.warning(
-                "CONSENSUS_API_KEY not set. Falling back to GEMINI_API_KEY. "
-                "Consensus service may not function if neither is set."
+                "CONSENSUS_API_URL is not set. "
+                "Consensus service will raise RuntimeError on first call. "
+                "Set CONSENSUS_API_URL in your .env file."
             )
         else:
-            genai.configure(api_key=api_key)
-
-        model_name = os.getenv("CONSENSUS_MODEL", "gemini-1.5-pro")
-        self._model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config=genai.GenerationConfig(
-                temperature=0.2,        # Slightly higher temp for better reasoning
-                max_output_tokens=2048,
-                response_mime_type="application/json",
-            ),
-        )
-        logger.info(f"ConsensusService initialized with model: {model_name}")
+            logger.info(f"ConsensusService initialized → endpoint: {self._api_url}")
 
     async def arbitrate(
         self,
@@ -59,55 +73,151 @@ class ConsensusService:
         qwen_result: dict[str, Any],
     ) -> dict[str, Any]:
         """
-        Resolve a conflict between Gemini and Qwen diagnoses.
+        Submit both VLM diagnoses to the research API for consensus validation.
 
         Args:
-            gemini_result: Structured diagnosis from GeminiService.
-            qwen_result: Structured diagnosis from QwenService.
+            gemini_result: Structured diagnosis dict from GeminiService (primary).
+            qwen_result: Structured diagnosis dict from QwenService (secondary).
 
         Returns:
-            A validated diagnosis dictionary with an additional "source" key
-            set to "consensus" and an optional "reasoning" field.
+            A validated, sanitized diagnosis dictionary tagged with source="consensus".
 
         Raises:
-            RuntimeError: On API failure or unparseable response.
+            RuntimeError: If the API is unreachable, returns a non-200 status,
+                          or returns an unparseable response.
         """
+        if not self._api_url:
+            raise RuntimeError(
+                "Consensus API URL is not configured. "
+                "Please set CONSENSUS_API_URL in your .env file."
+            )
+
         logger.info(
-            f"Consensus triggered | Gemini: '{gemini_result.get('disease_name')}' "
-            f"vs Qwen: '{qwen_result.get('disease_name')}'"
+            f"Consensus arbitration → "
+            f"Gemini said: '{gemini_result.get('disease_name')}' | "
+            f"Qwen said: '{qwen_result.get('disease_name')}'"
         )
 
-        prompt = build_consensus_prompt(gemini_result, qwen_result)
+        # Build the request payload
+        payload = self._build_payload(gemini_result, qwen_result)
 
+        # Build request headers
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
+        # Call the research API
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self._model.generate_content(prompt)
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                response = await client.post(
+                    self._api_url,
+                    json=payload,
+                    headers=headers,
+                )
+                response.raise_for_status()
+
+        except httpx.TimeoutException:
+            raise RuntimeError(
+                f"Consensus research API timed out after {TIMEOUT_SECONDS}s. "
+                f"Endpoint: {self._api_url}"
             )
-        except Exception as e:
-            logger.error(f"Consensus API call failed: {e}", exc_info=True)
-            raise RuntimeError(f"Consensus AI error: {e}") from e
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"Consensus API returned HTTP {e.response.status_code}: "
+                f"{e.response.text[:300]}"
+            ) from e
+        except httpx.RequestError as e:
+            raise RuntimeError(
+                f"Consensus API network error: {e}. "
+                f"Check that CONSENSUS_API_URL is reachable."
+            ) from e
 
-        raw_text = ""
+        # Parse and normalize the response
         try:
+            raw = response.json()
+        except Exception:
             raw_text = response.text
-        except Exception as e:
-            raise RuntimeError(f"Consensus returned an empty or blocked response: {e}") from e
+            logger.debug(f"Consensus raw text response: {raw_text[:400]}")
+            try:
+                raw = extract_json(raw_text)
+            except ValueError as e:
+                raise RuntimeError(
+                    f"Consensus API returned non-JSON response: {e}"
+                ) from e
 
-        logger.debug(f"Consensus raw response (first 400 chars): {raw_text[:400]}")
+        # The research API may wrap its result — unwrap common envelope patterns
+        result_data = self._unwrap(raw)
 
+        # Validate and sanitize against our schema
         try:
-            parsed = extract_json(raw_text)
-            validated = validate_diagnosis(parsed)
-        except ValueError as e:
-            raise RuntimeError(f"Consensus response parsing failed: {e}") from e
+            validated = validate_diagnosis(result_data)
+        except Exception as e:
+            raise RuntimeError(
+                f"Consensus API response failed schema validation: {e}"
+            ) from e
 
-        # Tag the source for traceability
         validated["source"] = "consensus"
 
         logger.info(
             f"Consensus result: '{validated['disease_name']}' "
-            f"({validated['confidence']}% confidence) | "
-            f"Reasoning: {validated.get('reasoning', 'N/A')[:100]}"
+            f"({validated['confidence']}% confidence)"
         )
-
         return validated
+
+    # -----------------------------------------------------------------------
+    # Helpers
+    # -----------------------------------------------------------------------
+
+    def _build_payload(
+        self,
+        gemini_result: dict[str, Any],
+        qwen_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Build the POST payload for the research consensus API.
+
+        Sends both VLM diagnoses so the research API has full context
+        to make an informed arbitration decision.
+        """
+        return {
+            "primary_diagnosis": {
+                "model": "gemini",
+                "disease_name": gemini_result.get("disease_name", ""),
+                "pathogen": gemini_result.get("pathogen", ""),
+                "confidence": gemini_result.get("confidence", 0),
+                "stage": gemini_result.get("stage", ""),
+                "description": gemini_result.get("description", ""),
+                "treatment": gemini_result.get("treatment", []),
+                "prevention": gemini_result.get("prevention", []),
+            },
+            "secondary_diagnosis": {
+                "model": "qwen",
+                "disease_name": qwen_result.get("disease_name", ""),
+                "pathogen": qwen_result.get("pathogen", ""),
+                "confidence": qwen_result.get("confidence", 0),
+                "stage": qwen_result.get("stage", ""),
+                "description": qwen_result.get("description", ""),
+                "treatment": qwen_result.get("treatment", []),
+                "prevention": qwen_result.get("prevention", []),
+            },
+        }
+
+    def _unwrap(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """
+        Unwrap common API response envelope patterns.
+
+        Many research APIs wrap their result in a top-level key like:
+            { "data": { ...diagnosis... } }
+            { "result": { ...diagnosis... } }
+            { "diagnosis": { ...diagnosis... } }
+
+        If no known wrapper is found, assume the raw dict IS the diagnosis.
+        """
+        for key in ("data", "result", "diagnosis", "response"):
+            if key in raw and isinstance(raw[key], dict):
+                logger.debug(f"Unwrapped consensus response from '{key}' key.")
+                return raw[key]
+        return raw

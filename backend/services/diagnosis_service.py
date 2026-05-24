@@ -3,12 +3,17 @@ services/diagnosis_service.py — Central AI orchestration service.
 
 This is the heart of the AgriSense pipeline.
 
+Model roles:
+  - PRIMARY:   Gemini Vision (Google)  → always preferred on match
+  - SECONDARY: Qwen Vision (Alibaba)   → cross-validation model
+  - CONSENSUS: External research API   → triggered only on mismatch
+
 Pipeline:
-  1. Run Gemini and Qwen analyses CONCURRENTLY (asyncio.gather)
-  2. Compare results via ComparatorService (fuzzy matching)
-  3a. If MATCH → pick the higher-confidence result → return with source tag
-  3b. If MISMATCH → invoke ConsensusService → return consensus result
-  4. Build frontend-compatible chips from stage/confidence
+  1. Run Gemini (primary) and Qwen (secondary) analyses CONCURRENTLY
+  2. Compare results via ComparatorService (rapidfuzz fuzzy matching)
+  3a. If MATCH  → return Gemini (primary) result — it is the authoritative source
+  3b. If MISMATCH → call external Consensus research API for validation
+  4. Build frontend-compatible chips from stage/confidence/source
   5. Return fully structured final diagnosis
 """
 
@@ -37,8 +42,11 @@ _STAGE_CHIP_COLORS: dict[str, str] = {
 
 class DiagnosisService:
     """
-    Central orchestrator that coordinates all AI services and returns
-    a fully structured, frontend-ready diagnosis dictionary.
+    Central orchestrator that coordinates the primary (Gemini),
+    secondary (Qwen), and consensus (research API) services.
+
+    On agreement: Gemini's result is returned as the authoritative source.
+    On disagreement: The external research consensus API arbitrates.
     """
 
     def __init__(self) -> None:
@@ -64,25 +72,25 @@ class DiagnosisService:
         Returns:
             Fully structured diagnosis dictionary ready for the API response.
         """
-        logger.info(f"[{request_id}] Starting dual-VLM analysis...")
+        logger.info(f"[{request_id}] Starting dual-VLM analysis (Primary: Gemini | Secondary: Qwen)...")
 
         # ---------------------------------------------------------------
-        # Step 1: Run Gemini and Qwen concurrently
+        # Step 1: Run Gemini (primary) and Qwen (secondary) concurrently
         # ---------------------------------------------------------------
         gemini_result, qwen_result = await asyncio.gather(
-            self._safe_analyze(self._gemini.analyze, image_base64, "Gemini", request_id),
-            self._safe_analyze(self._qwen.analyze, image_base64, "Qwen", request_id),
+            self._safe_analyze(self._gemini.analyze, image_base64, "Gemini [PRIMARY]", request_id),
+            self._safe_analyze(self._qwen.analyze, image_base64, "Qwen [SECONDARY]", request_id),
         )
 
         logger.info(
-            f"[{request_id}] Gemini → {gemini_result.get('disease_name')} "
+            f"[{request_id}] PRIMARY (Gemini) → '{gemini_result.get('disease_name')}' "
             f"({gemini_result.get('confidence')}%) | "
-            f"Qwen → {qwen_result.get('disease_name')} "
+            f"SECONDARY (Qwen) → '{qwen_result.get('disease_name')}' "
             f"({qwen_result.get('confidence')}%)"
         )
 
         # ---------------------------------------------------------------
-        # Step 2: Compare outputs
+        # Step 2: Compare outputs via fuzzy matching
         # ---------------------------------------------------------------
         comparison = self._comparator.compare(gemini_result, qwen_result)
         logger.info(
@@ -91,30 +99,36 @@ class DiagnosisService:
         )
 
         # ---------------------------------------------------------------
-        # Step 3a: Match → pick the higher-confidence result
+        # Step 3a: MATCH → always use Gemini (primary) as authoritative result
         # ---------------------------------------------------------------
         if comparison["matched"]:
-            best, source = self._comparator.pick_best(gemini_result, qwen_result)
-            final = dict(best)
-            final["source"] = source
-            logger.info(f"[{request_id}] VLMs agreed → using {source} result")
+            # Gemini is primary — its result is the authoritative source on agreement.
+            # We still log Qwen's confidence for transparency.
+            final = dict(gemini_result)
+            final["source"] = "gemini"
+            logger.info(
+                f"[{request_id}] VLMs AGREED → returning Gemini (primary) result. "
+                f"Qwen corroborated with score {comparison['similarity_score']}"
+            )
 
         # ---------------------------------------------------------------
-        # Step 3b: Mismatch → invoke consensus AI
+        # Step 3b: MISMATCH → invoke external research Consensus API
         # ---------------------------------------------------------------
         else:
-            logger.info(f"[{request_id}] VLMs disagreed → invoking consensus AI...")
+            logger.info(
+                f"[{request_id}] VLMs DISAGREED → invoking research Consensus API to arbitrate..."
+            )
             try:
                 final = await self._consensus.arbitrate(gemini_result, qwen_result)
             except RuntimeError as e:
-                # Fallback: if consensus fails, use the higher-confidence model
+                # Fallback: if consensus API is unavailable, trust primary (Gemini)
                 logger.error(
-                    f"[{request_id}] Consensus AI failed: {e}. "
-                    "Falling back to higher-confidence VLM result."
+                    f"[{request_id}] Consensus API failed: {e}. "
+                    "Falling back to Gemini (primary) result."
                 )
-                best, source = self._comparator.pick_best(gemini_result, qwen_result)
-                final = dict(best)
-                final["source"] = source
+                final = dict(gemini_result)
+                final["source"] = "gemini"
+                final["consensus_fallback"] = True
 
         # ---------------------------------------------------------------
         # Step 4: Enrich with comparison metadata and frontend chips
@@ -188,9 +202,9 @@ class DiagnosisService:
 
         # Source chip
         source_labels = {
-            "gemini": ("Gemini Verified", "chip-blue"),
-            "qwen": ("Qwen Verified", "chip-blue"),
-            "consensus": ("Consensus Validated", "chip-green"),
+            "gemini": ("Gemini Primary", "chip-blue"),
+            "qwen": ("Qwen Secondary", "chip-blue"),
+            "consensus": ("Research Validated", "chip-green"),
         }
         label, color = source_labels.get(source, ("AI Analyzed", "chip-blue"))
         chips.append({"t": label, "c": color})
