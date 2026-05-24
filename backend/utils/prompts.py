@@ -47,6 +47,60 @@ Return this exact JSON structure:
 }"""
 
 # ---------------------------------------------------------------------------
+# COMPARISON PROMPT
+# Used by comparator_service.py — Gemini determines if both VLMs agree
+# ---------------------------------------------------------------------------
+def build_comparison_prompt(gemini_result: dict, qwen_result: dict) -> str:
+    """
+    Instruct Gemini to act as an expert plant pathologist and evaluate
+    whether the two VLM diagnoses are describing the same disease.
+
+    This is intentionally reasoning-based — not string matching — so it
+    handles synonyms, partial names, scientific vs common naming, and
+    closely related diseases (e.g. Early Blight vs Alternaria Blight).
+    """
+    return f"""You are an expert plant pathologist. Two AI Vision models independently analyzed the same crop image and produced the following disease diagnoses.
+
+PRIMARY MODEL (Gemini) diagnosed:
+  Disease: {gemini_result.get("disease_name", "Unknown")}
+  Pathogen: {gemini_result.get("pathogen", "Unknown")}
+  Stage: {gemini_result.get("stage", "Unknown")}
+  Description: {gemini_result.get("description", "")}
+
+SECONDARY MODEL (Qwen) diagnosed:
+  Disease: {qwen_result.get("disease_name", "Unknown")}
+  Pathogen: {qwen_result.get("pathogen", "Unknown")}
+  Stage: {qwen_result.get("stage", "Unknown")}
+  Description: {qwen_result.get("description", "")}
+
+Your task: Determine whether both models are diagnosing the SAME underlying disease.
+
+MATCHING RULES:
+- Two diagnoses MATCH if they refer to the same disease, even if named differently.
+  (e.g. "Early Blight" and "Alternaria Blight" are the SAME disease)
+  (e.g. "Late Blight" and "Phytophthora Blight" are the SAME disease)
+  (e.g. "Tomato Late Blight" and "Late Blight" are the SAME disease)
+- Two diagnoses DO NOT MATCH if they refer to fundamentally different diseases.
+  (e.g. "Late Blight" vs "Powdery Mildew" are DIFFERENT)
+  (e.g. "Bacterial Wilt" vs "Fusarium Wilt" are DIFFERENT)
+- If one model says "Healthy Plant" and the other identifies a disease, they DO NOT MATCH.
+- If the stage is very different (e.g. Early vs Critical) but disease is the same, they still MATCH.
+
+STRICT RULES:
+1. Return ONLY valid JSON — no markdown, no code fences, no extra text.
+2. "matched" must be a boolean: true or false.
+3. "reasoning" must be 1-2 sentences explaining your decision.
+4. "confidence" is your confidence in the match/mismatch decision (0-100).
+
+Return this exact JSON:
+{{
+  "matched": true,
+  "reasoning": "<your 1-2 sentence scientific reasoning>",
+  "confidence": <integer 0-100>
+}}"""
+
+
+# ---------------------------------------------------------------------------
 # AGRICULTURAL CHATBOT SYSTEM PROMPT
 # Used by chatbot_service.py
 # ---------------------------------------------------------------------------

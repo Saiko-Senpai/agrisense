@@ -90,12 +90,13 @@ class DiagnosisService:
         )
 
         # ---------------------------------------------------------------
-        # Step 2: Compare outputs via fuzzy matching
+        # Step 2: Gemini compares both outputs (no string matching)
         # ---------------------------------------------------------------
-        comparison = self._comparator.compare(gemini_result, qwen_result)
+        comparison = await self._comparator.compare(gemini_result, qwen_result)
         logger.info(
-            f"[{request_id}] Comparison score: {comparison['similarity_score']} | "
-            f"matched: {comparison['matched']}"
+            f"[{request_id}] Gemini comparator | matched={comparison['matched']} | "
+            f"confidence={comparison['confidence']}% | "
+            f"reasoning: {comparison['reasoning'][:100]}"
         )
 
         # ---------------------------------------------------------------
@@ -108,7 +109,7 @@ class DiagnosisService:
             final["source"] = "gemini"
             logger.info(
                 f"[{request_id}] VLMs AGREED → returning Gemini (primary) result. "
-                f"Qwen corroborated with score {comparison['similarity_score']}"
+                f"Qwen corroborated. Comparator confidence: {comparison['confidence']}%"
             )
 
         # ---------------------------------------------------------------
@@ -133,12 +134,12 @@ class DiagnosisService:
         # ---------------------------------------------------------------
         # Step 4: Enrich with comparison metadata and frontend chips
         # ---------------------------------------------------------------
-        final["similarity_score"] = comparison["similarity_score"]
-        final["matched"] = comparison["matched"]
+        final["comparison_matched"] = comparison["matched"]
+        final["comparison_confidence"] = comparison["confidence"]
+        final["comparison_reasoning"] = comparison["reasoning"]
         final["chips"] = self._build_chips(final)
 
-        # Ensure disease_name key matches frontend expectation
-        # (frontend uses "disease" not "disease_name")
+        # Rename disease_name → disease to match frontend TypeScript type
         final["disease"] = final.pop("disease_name", "Unknown Disease")
 
         return final
