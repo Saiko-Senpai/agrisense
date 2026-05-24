@@ -1,0 +1,3 @@
+# Uploaded crop images are stored here temporarily.
+# This directory is intentionally tracked but kept empty.
+# Files in this directory are ignored by .gitignore (see uploads/* rule).
