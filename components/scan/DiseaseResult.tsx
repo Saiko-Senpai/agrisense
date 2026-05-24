@@ -145,19 +145,61 @@ export default function DiseaseResult({ result, onReset }: Props) {
     setMessages((prev) => [...prev, userMsg]);
     setTyping(true);
 
-    // Simulate thinking delay
-    await new Promise((r) => setTimeout(r, 800 + Math.random() * 500));
-    
-    const aiResponseText = getAIResponse(msg);
-    setTyping(false);
+    try {
+      // Build conversation history excluding the welcome message
+      const history = messages
+        .filter((m) => m.id !== "welcome")
+        .map((m) => ({
+          role: m.isUser ? "user" : "assistant",
+          content: m.text,
+        }));
 
-    const aiMsg: ChatMessage = {
-      id: generateId(),
-      text: aiResponseText,
-      isUser: false,
-      timestamp: new Date()
-    };
-    setMessages((prev) => [...prev, aiMsg]);
+      // Enrich context with detailed disease, pathogen, and treatment plan details
+      const cropName = result.crop || "Crop";
+      const diseaseInfo = `Crop: ${cropName}. Disease: ${result.disease} (Pathogen: ${result.pathogen}, Confidence: ${result.confidence}%). Stage: ${result.stage}. Description: ${result.text.replace(/<[^>]*>/g, "")}. Recommended Treatment Plan: ${result.treatment.join("; ")}. Prevention Measures: ${result.prevention.join("; ")}.`;
+
+      const response = await fetch("http://localhost:8000/chat/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: msg,
+          crop_context: cropName,
+          disease_context: diseaseInfo,
+          conversation_history: history,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const resData = await response.json();
+      if (resData.success && resData.data && resData.data.reply) {
+        const aiMsg: ChatMessage = {
+          id: generateId(),
+          text: resData.data.reply,
+          isUser: false,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+      } else {
+        throw new Error("Invalid response format");
+      }
+    } catch (err) {
+      console.error("Failed to fetch backend chat reply, using mock fallback:", err);
+      const aiResponseText = getAIResponse(msg);
+      const aiMsg: ChatMessage = {
+        id: generateId(),
+        text: aiResponseText,
+        isUser: false,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMsg]);
+    } finally {
+      setTyping(false);
+    }
   };
 
   return (
@@ -191,7 +233,7 @@ export default function DiseaseResult({ result, onReset }: Props) {
         {/* Disease badge */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <span className="inline-flex items-center gap-1.5 bg-red-50 text-red-700 border border-red-200 px-3 py-1 rounded-full text-sm font-bold">
-            🔴 {result.disease}
+            🔴 {result.disease}{result.crop ? ` (${result.crop})` : ""}
           </span>
           <span className="text-xs text-gray-400 italic">{result.pathogen}</span>
         </div>
@@ -227,7 +269,7 @@ export default function DiseaseResult({ result, onReset }: Props) {
         {/* Treatment / Prevention grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
           <div>
-            <div className="text-xs font-bold text-gray-700 mb-2 uppercase tracking-wide">💊 Treatment</div>
+            <div className="text-xs font-bold text-gray-700 mb-2 uppercase tracking-wide">💊 {result.crop ? `${result.crop} ` : ""}Treatment</div>
             <ul className="space-y-1.5">
               {result.treatment.map((item) => (
                 <li key={item} className="text-xs text-gray-500 leading-relaxed flex gap-2">
@@ -238,7 +280,7 @@ export default function DiseaseResult({ result, onReset }: Props) {
             </ul>
           </div>
           <div>
-            <div className="text-xs font-bold text-gray-700 mb-2 uppercase tracking-wide">🛡️ Prevention</div>
+            <div className="text-xs font-bold text-gray-700 mb-2 uppercase tracking-wide">🛡️ {result.crop ? `${result.crop} ` : ""}Prevention</div>
             <ul className="space-y-1.5">
               {result.prevention.map((item) => (
                 <li key={item} className="text-xs text-gray-500 leading-relaxed flex gap-2">

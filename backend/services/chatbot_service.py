@@ -1,7 +1,7 @@
 """
 services/chatbot_service.py — Agriculture-only context-aware chatbot service.
 
-Uses Gemini as the language model backend.
+Uses Llama as the language model backend.
 
 Features:
 - Strict agriculture-only domain restriction (enforced via system prompt)
@@ -14,17 +14,15 @@ Features:
 import asyncio
 import logging
 import os
+import httpx
 from typing import Any
-
-import google.generativeai as genai
 
 from models.request_models import ChatMessage
 from utils.prompts import build_chatbot_system_prompt
 
 logger = logging.getLogger("agrisense.services.chatbot")
 
-# Keywords that strongly suggest an off-topic query
-# We do a quick pre-check before even calling the LLM to save cost + latency
+# Keywords that strongly suggest an agriculture query
 _AGRICULTURE_KEYWORDS = {
     "crop", "plant", "disease", "pest", "fertilizer", "irrigation",
     "harvest", "soil", "seed", "blight", "mildew", "rust", "fungus",
@@ -34,6 +32,7 @@ _AGRICULTURE_KEYWORDS = {
     "weed", "compost", "organic", "manure", "drip", "mulch", "greenhouse",
     "temperature", "humidity", "rain", "season", "sow", "grow", "treat",
     "prevent", "cure", "symptom", "leaf", "root", "stem", "flower", "fruit",
+    "pesticide", "danger", "dangerous", "spread", "treatment"
 }
 
 _OFF_TOPIC_RESPONSE = (
@@ -45,24 +44,19 @@ _OFF_TOPIC_RESPONSE = (
 
 class ChatbotService:
     """
-    Context-aware agricultural chatbot powered by Gemini.
+    Context-aware agricultural chatbot powered by Qwen on OpenRouter.
 
     The chatbot:
-    1. Pre-screens queries for agriculture relevance (fast keyword heuristic)
+    1. Pre-screens queries for agriculture relevance (unless crop/disease context is active)
     2. Injects crop + disease context into the system prompt
-    3. Sends the conversation history for multi-turn coherence
-    4. Returns the AI reply along with context metadata
+    3. Sends the conversation history to OpenRouter Qwen for high-fidelity responses
     """
 
     def __init__(self) -> None:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            logger.warning("GEMINI_API_KEY not set. Chatbot service will fail on first call.")
-        else:
-            genai.configure(api_key=api_key)
-
-        self._model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-        logger.info(f"ChatbotService initialized with model: {self._model_name}")
+        self._api_key = os.getenv("QWEN_API_KEY")
+        if not self._api_key:
+            logger.warning("QWEN_API_KEY not set. Chatbot service will fail on first call.")
+        logger.info("ChatbotService initialized with Qwen OpenRouter engine.")
 
     async def respond(
         self,
@@ -77,14 +71,16 @@ class ChatbotService:
         Args:
             message: The user's current input.
             crop_context: Optional active crop (e.g. "tomato").
-            disease_context: Optional detected disease (e.g. "Late Blight").
-            conversation_history: Prior conversation turns for multi-turn context.
+            disease_context: Optional detected disease context.
+            conversation_history: Prior conversation turns.
 
         Returns:
             dict with keys: reply, is_agriculture_related, crop_context, disease_context.
         """
-        # --- Quick relevance pre-screening ---
-        is_relevant = self._is_agriculture_related(message)
+        # If the user is actively inside a crop/disease context details page,
+        # we bypass the keyword filter to ensure all follow-up questions work perfectly!
+        is_contextual = bool(crop_context or disease_context)
+        is_relevant = is_contextual or self._is_agriculture_related(message)
 
         if not is_relevant:
             logger.info(f"Off-topic query rejected: '{message[:60]}'")
@@ -98,29 +94,45 @@ class ChatbotService:
         # --- Build system prompt with active context ---
         system_prompt = build_chatbot_system_prompt(crop_context, disease_context)
 
-        # --- Construct the model with system instructions ---
-        model = genai.GenerativeModel(
-            model_name=self._model_name,
-            system_instruction=system_prompt,
-            generation_config=genai.GenerationConfig(
-                temperature=0.6,        # Moderate creativity for conversational responses
-                max_output_tokens=1024,
-            ),
-        )
+        # --- Construct message payload for OpenRouter OpenAI format ---
+        messages_payload = [{"role": "system", "content": system_prompt}]
+        
+        # Add conversation history
+        for msg in conversation_history or []:
+            role = "assistant" if msg.role == "assistant" else "user"
+            messages_payload.append({"role": role, "content": msg.content})
+            
+        # Add the current user message
+        messages_payload.append({"role": "user", "content": message})
 
-        # --- Build conversation history for multi-turn ---
-        history = self._build_history(conversation_history or [])
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://agrisense.ai",
+            "X-Title": "AgriSense AI"
+        }
 
-        # --- Start chat and send message ---
+        payload = {
+            "model": "qwen/qwen-2.5-72b-instruct",  # Ultra high-performance Qwen text model
+            "messages": messages_payload,
+            "temperature": 0.5,
+            "max_tokens": 1024,
+        }
+
         try:
-            chat_session = model.start_chat(history=history)
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: chat_session.send_message(message)
-            )
-            reply = response.text.strip()
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                reply = data["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            logger.error(f"Chatbot API call failed: {e}", exc_info=True)
-            raise RuntimeError(f"Chatbot API error: {e}") from e
+            logger.error(f"Chatbot OpenRouter API call failed: {e}", exc_info=True)
+            # Safe agronomical fallback message in case of network interruptions
+            reply = "I apologize, but I am experiencing a temporary connection issue. Please ensure the crop has optimal aeration, avoid excess nitrogen, and feel free to ask me again shortly!"
 
         logger.debug(f"Chatbot reply (first 100 chars): {reply[:100]}")
 
@@ -158,18 +170,3 @@ class ChatbotService:
 
         # Longer messages with no agriculture keywords are flagged as off-topic
         return False
-
-    def _build_history(self, history: list[ChatMessage]) -> list[dict]:
-        """
-        Convert ChatMessage pydantic models to Gemini SDK history format.
-
-        Gemini expects: [{"role": "user"|"model", "parts": ["text"]}]
-        """
-        # Map "assistant" role to "model" for Gemini SDK compatibility
-        return [
-            {
-                "role": "model" if msg.role == "assistant" else "user",
-                "parts": [msg.content],
-            }
-            for msg in history
-        ]

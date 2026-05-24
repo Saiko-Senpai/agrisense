@@ -26,7 +26,7 @@ async def health_check() -> JSONResponse:
     uptime_seconds = round(time.time() - _start_time, 1)
 
     services = {
-        "gemini": bool(os.getenv("GEMINI_API_KEY")),
+        "llama": bool(os.getenv("LLAMA_API_KEY")),
         "qwen": bool(os.getenv("QWEN_API_KEY")),
         "consensus": bool(os.getenv("CONSENSUS_API_KEY")),
     }

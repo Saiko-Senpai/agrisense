@@ -23,7 +23,7 @@
   },
   "pipeline": {
     "title": "AI Analysis Pipeline",
-    "steps": ["Image Upload", "Gemini 2.5 Flash", "Qwen 2.5 Instruct 7B", "Consensus Verification", "Final Diagnosis"]
+    "steps": ["Image Upload", "LLama 3.2 Vision", "Qwen 2.5 Instruct 7B", "Consensus Verification", "Final Diagnosis"]
   },
   "crops": {
     "title": "Explore Crop Library",

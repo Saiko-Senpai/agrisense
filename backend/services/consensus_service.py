@@ -1,7 +1,7 @@
 """
 services/consensus_service.py — External Research API consensus service.
 
-Triggered ONLY when Gemini (primary) and Qwen (secondary) disagree
+Triggered ONLY when Llama (primary) and Qwen (secondary) disagree
 on the disease diagnosis.
 
 The consensus service calls an external, research-backed plant disease
@@ -13,7 +13,7 @@ Configuration (via .env):
 
 The external API is expected to receive a POST request with:
     {
-        "gemini_diagnosis": { ...structured diagnosis dict... },
+        "llama_diagnosis": { ...structured diagnosis dict... },
         "qwen_diagnosis":   { ...structured diagnosis dict... }
     }
 
@@ -41,14 +41,13 @@ import httpx
 from utils.parser import extract_json, validate_diagnosis
 
 logger = logging.getLogger("agrisense.services.consensus")
-
 TIMEOUT_SECONDS = 30
 
 
 class ConsensusService:
     """
     Calls an external plant disease research API to arbitrate between
-    conflicting Gemini and Qwen diagnoses.
+    conflicting Llama and Qwen diagnoses.
 
     The external API acts as a scientific ground-truth source, providing
     research-validated disease identification results.
@@ -69,14 +68,14 @@ class ConsensusService:
 
     async def arbitrate(
         self,
-        gemini_result: dict[str, Any],
+        llama_result: dict[str, Any],
         qwen_result: dict[str, Any],
     ) -> dict[str, Any]:
         """
         Submit both VLM diagnoses to the research API for consensus validation.
 
         Args:
-            gemini_result: Structured diagnosis dict from GeminiService (primary).
+            llama_result: Structured diagnosis dict from LlamaService (primary).
             qwen_result: Structured diagnosis dict from QwenService (secondary).
 
         Returns:
@@ -94,12 +93,12 @@ class ConsensusService:
 
         logger.info(
             f"Consensus arbitration → "
-            f"Gemini said: '{gemini_result.get('disease_name')}' | "
+            f"Llama said: '{llama_result.get('disease_name')}' | "
             f"Qwen said: '{qwen_result.get('disease_name')}'"
         )
 
         # Build the request payload
-        payload = self._build_payload(gemini_result, qwen_result)
+        payload = self._build_payload(llama_result, qwen_result)
 
         # Build request headers
         headers = {
@@ -173,7 +172,7 @@ class ConsensusService:
 
     def _build_payload(
         self,
-        gemini_result: dict[str, Any],
+        llama_result: dict[str, Any],
         qwen_result: dict[str, Any],
     ) -> dict[str, Any]:
         """
@@ -184,14 +183,14 @@ class ConsensusService:
         """
         return {
             "primary_diagnosis": {
-                "model": "gemini",
-                "disease_name": gemini_result.get("disease_name", ""),
-                "pathogen": gemini_result.get("pathogen", ""),
-                "confidence": gemini_result.get("confidence", 0),
-                "stage": gemini_result.get("stage", ""),
-                "description": gemini_result.get("description", ""),
-                "treatment": gemini_result.get("treatment", []),
-                "prevention": gemini_result.get("prevention", []),
+                "model": "llama",
+                "disease_name": llama_result.get("disease_name", ""),
+                "pathogen": llama_result.get("pathogen", ""),
+                "confidence": llama_result.get("confidence", 0),
+                "stage": llama_result.get("stage", ""),
+                "description": llama_result.get("description", ""),
+                "treatment": llama_result.get("treatment", []),
+                "prevention": llama_result.get("prevention", []),
             },
             "secondary_diagnosis": {
                 "model": "qwen",

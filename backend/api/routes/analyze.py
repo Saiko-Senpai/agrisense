@@ -3,7 +3,7 @@ POST /analyze — Crop disease image analysis endpoint.
 
 Pipeline:
   1. Validate and preprocess the uploaded image
-  2. Run Qwen Vision analysis concurrently with Gemini Vision analysis
+  2. Run Qwen Vision analysis concurrently with Llama Vision analysis
   3. Compare both outputs via the comparator service
   4. If match → return verified diagnosis
   5. If mismatch → invoke consensus service and return validated diagnosis
@@ -43,7 +43,7 @@ async def analyze_crop(
     Upload a crop image to receive an AI-powered disease diagnosis.
 
     The endpoint runs the dual-VLM pipeline:
-    - **Qwen Vision** and **Gemini Vision** analyze the image in parallel.
+    - **Qwen Vision** and **Llama Vision** analyze the image in parallel.
     - A **comparator** scores similarity between the two outputs.
     - On disagreement, a **consensus AI** arbitrates the final diagnosis.
 

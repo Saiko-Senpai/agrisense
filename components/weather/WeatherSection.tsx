@@ -13,6 +13,7 @@ export default function WeatherSection() {
   const [advisory, setAdvisory] = useState<Advisory[]>([]);
   const [selectedCrop, setSelectedCrop] = useState("Rice");
   const [loading, setLoading] = useState(true);
+  const [advisoryLoading, setAdvisoryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,7 +33,53 @@ export default function WeatherSection() {
   }, []);
 
   useEffect(() => {
-    if (weather) setAdvisory(getWeatherAdvisory(weather, selectedCrop));
+    if (!weather) return;
+
+    const currentWeather = weather;
+    let active = true;
+
+    async function fetchAIAdvisory() {
+      setAdvisoryLoading(true);
+      try {
+        const response = await fetch("http://localhost:8000/advisory/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            crop_name: selectedCrop,
+            weather_data: currentWeather,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const resData = await response.json();
+        if (active && resData.success && resData.data && resData.data.advisories) {
+          setAdvisory(resData.data.advisories);
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to fetch AI crop advisory, falling back to static:", err);
+      }
+
+      // Fallback to static advisory if AI call fails or is cancelled
+      if (active) {
+        setAdvisory(getWeatherAdvisory(currentWeather, selectedCrop));
+      }
+    }
+
+    fetchAIAdvisory().then(() => {
+      if (active) {
+        setAdvisoryLoading(false);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
   }, [selectedCrop, weather]);
 
   const advTypeStyle: Record<string, string> = {
@@ -129,19 +176,36 @@ export default function WeatherSection() {
 
           {/* Advisory cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {advisory.map((adv, i) => (
-              <motion.div
-                key={adv.title}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.08 }}
-                className={`rounded-xl p-4 border-l-4 ${advTypeStyle[adv.type]}`}
-              >
-                <div className="text-2xl mb-2">{adv.icon}</div>
-                <div className="font-semibold text-gray-800 text-sm mb-1">{adv.title}</div>
-                <p className="text-gray-500 text-xs leading-relaxed">{adv.text}</p>
-              </motion.div>
-            ))}
+            {advisoryLoading ? (
+              [1, 2, 3, 4, 5].map((i) => (
+                <div
+                  key={i}
+                  className="rounded-xl p-4 border border-green-100 bg-white/50 animate-pulse flex flex-col gap-3"
+                >
+                  <div className="skeleton w-8 h-8 rounded-full" />
+                  <div className="skeleton w-24 h-4" />
+                  <div className="space-y-1.5">
+                    <div className="skeleton w-full h-3" />
+                    <div className="skeleton w-5/6 h-3" />
+                    <div className="skeleton w-4/6 h-3" />
+                  </div>
+                </div>
+              ))
+            ) : (
+              advisory.map((adv, i) => (
+                <motion.div
+                  key={adv.title}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.08 }}
+                  className={`rounded-xl p-4 border-l-4 ${advTypeStyle[adv.type]}`}
+                >
+                  <div className="text-2xl mb-2">{adv.icon}</div>
+                  <div className="font-semibold text-gray-800 text-sm mb-1">{adv.title}</div>
+                  <p className="text-gray-500 text-xs leading-relaxed">{adv.text}</p>
+                </motion.div>
+              ))
+            )}
           </div>
         </motion.div>
       )}

@@ -48,12 +48,54 @@ export default function Chatbot({ initialQuery }: ChatbotProps) {
     setMessages((prev) => [...prev, userMsg]);
     setTyping(true);
 
-    await new Promise((r) => setTimeout(r, 1000 + Math.random() * 700));
-    const response = getAIResponse(msg);
-    setTyping(false);
+    try {
+      const history = messages
+        .filter((m) => m.id !== "welcome")
+        .map((m) => ({
+          role: m.isUser ? "user" : "assistant",
+          content: m.text,
+        }));
 
-    const aiMsg: ChatMessage = { id: generateId(), text: response, isUser: false, timestamp: new Date() };
-    setMessages((prev) => [...prev, aiMsg]);
+      const response = await fetch("http://localhost:8000/chat/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: msg,
+          conversation_history: history,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const resData = await response.json();
+      if (resData.success && resData.data && resData.data.reply) {
+        const aiMsg: ChatMessage = {
+          id: generateId(),
+          text: resData.data.reply,
+          isUser: false,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+      } else {
+        throw new Error("Invalid response format");
+      }
+    } catch (err) {
+      console.error("Failed to fetch backend chat reply, using mock fallback:", err);
+      const mockResponse = getAIResponse(msg);
+      const aiMsg: ChatMessage = {
+        id: generateId(),
+        text: mockResponse,
+        isUser: false,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMsg]);
+    } finally {
+      setTyping(false);
+    }
   }
 
   return (

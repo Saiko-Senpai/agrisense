@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 
 const STEPS = [
   { icon: "📸", label: "Image Upload", sub: "Processing image data" },
-  { icon: "⚡", label: "Gemini 2.5 Flash", sub: "Visual pattern recognition" },
+  { icon: "⚡", label: "LLama 3.2 Vision", sub: "Visual pattern recognition" },
   { icon: "🧠", label: "Qwen 2.5 Instruct 7B", sub: "Disease classification" },
   { icon: "✅", label: "Consensus Verification", sub: "Cross-model validation" },
   { icon: "💊", label: "Final Diagnosis", sub: "Treatment plan generation" },

@@ -9,16 +9,15 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from dotenv import load_dotenv
+
+# Load environment variables early so all services can access them
+load_dotenv(override=True)
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import analyze, chat, health
-
-# ---------------------------------------------------------------------------
-# Load environment variables early so all services can access them
-# ---------------------------------------------------------------------------
-load_dotenv()
+from api.routes import advisory, analyze, chat, health
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -40,7 +39,7 @@ async def lifespan(app: FastAPI):
     logger.info("🌱 AgriSense backend starting up...")
 
     # Validate required environment variables on startup
-    required_vars = ["GEMINI_API_KEY", "QWEN_API_KEY", "CONSENSUS_API_KEY"]
+    required_vars = ["LLAMA_API_KEY", "QWEN_API_KEY", "CONSENSUS_API_KEY"]
     missing = [v for v in required_vars if not os.getenv(v)]
     if missing:
         logger.warning(
@@ -64,7 +63,7 @@ app = FastAPI(
     title="AgriSense AI Backend",
     description=(
         "AI-powered crop disease detection platform using dual Vision Language Models "
-        "(Gemini + Qwen) with consensus validation and an agricultural chatbot."
+        "(Llama + Qwen) with consensus validation and an agricultural chatbot."
     ),
     version="1.0.0",
     docs_url="/docs",
@@ -108,6 +107,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(health.router, tags=["Health"])
 app.include_router(analyze.router, prefix="/analyze", tags=["Disease Analysis"])
 app.include_router(chat.router, prefix="/chat", tags=["Agricultural Chatbot"])
+app.include_router(advisory.router, prefix="/advisory", tags=["Weather Advisory"])
 
 
 # ---------------------------------------------------------------------------

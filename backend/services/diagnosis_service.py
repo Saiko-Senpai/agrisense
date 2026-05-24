@@ -4,14 +4,14 @@ services/diagnosis_service.py — Central AI orchestration service.
 This is the heart of the AgriSense pipeline.
 
 Model roles:
-  - PRIMARY:   Gemini Vision (Google)  → always preferred on match
+  - PRIMARY:   Llama Vision (Meta)     → always preferred on match
   - SECONDARY: Qwen Vision (Alibaba)   → cross-validation model
   - CONSENSUS: External research API   → triggered only on mismatch
 
 Pipeline:
-  1. Run Gemini (primary) and Qwen (secondary) analyses CONCURRENTLY
-  2. Compare results via ComparatorService (rapidfuzz fuzzy matching)
-  3a. If MATCH  → return Gemini (primary) result — it is the authoritative source
+  1. Run Llama (primary) and Qwen (secondary) analyses CONCURRENTLY
+  2. Compare results via ComparatorService
+  3a. If MATCH  → return Llama (primary) result — it is the authoritative source
   3b. If MISMATCH → call external Consensus research API for validation
   4. Build frontend-compatible chips from stage/confidence/source
   5. Return fully structured final diagnosis
@@ -23,7 +23,7 @@ from typing import Any
 
 from services.comparator_service import ComparatorService
 from services.consensus_service import ConsensusService
-from services.gemini_service import GeminiService
+from services.llama_service import LlamaService
 from services.qwen_service import QwenService
 
 logger = logging.getLogger("agrisense.services.diagnosis")
@@ -42,15 +42,15 @@ _STAGE_CHIP_COLORS: dict[str, str] = {
 
 class DiagnosisService:
     """
-    Central orchestrator that coordinates the primary (Gemini),
+    Central orchestrator that coordinates the primary (Llama),
     secondary (Qwen), and consensus (research API) services.
 
-    On agreement: Gemini's result is returned as the authoritative source.
+    On agreement: Llama's result is returned as the authoritative source.
     On disagreement: The external research consensus API arbitrates.
     """
 
     def __init__(self) -> None:
-        self._gemini = GeminiService()
+        self._llama = LlamaService()
         self._qwen = QwenService()
         self._comparator = ComparatorService()
         self._consensus = ConsensusService()
@@ -72,43 +72,42 @@ class DiagnosisService:
         Returns:
             Fully structured diagnosis dictionary ready for the API response.
         """
-        logger.info(f"[{request_id}] Starting dual-VLM analysis (Primary: Gemini | Secondary: Qwen)...")
+        logger.info(f"[{request_id}] Starting dual-VLM analysis (Primary: Llama | Secondary: Qwen)...")
 
         # ---------------------------------------------------------------
-        # Step 1: Run Gemini (primary) and Qwen (secondary) concurrently
+        # Step 1: Run Llama (primary) and Qwen (secondary) concurrently
         # ---------------------------------------------------------------
-        gemini_result, qwen_result = await asyncio.gather(
-            self._safe_analyze(self._gemini.analyze, image_base64, "Gemini [PRIMARY]", request_id),
+        llama_result, qwen_result = await asyncio.gather(
+            self._safe_analyze(self._llama.analyze, image_base64, "Llama [PRIMARY]", request_id),
             self._safe_analyze(self._qwen.analyze, image_base64, "Qwen [SECONDARY]", request_id),
         )
 
         logger.info(
-            f"[{request_id}] PRIMARY (Gemini) → '{gemini_result.get('disease_name')}' "
-            f"({gemini_result.get('confidence')}%) | "
+            f"[{request_id}] PRIMARY (Llama) → '{llama_result.get('disease_name')}' "
+            f"({llama_result.get('confidence')}%) | "
             f"SECONDARY (Qwen) → '{qwen_result.get('disease_name')}' "
             f"({qwen_result.get('confidence')}%)"
         )
 
         # ---------------------------------------------------------------
-        # Step 2: Gemini compares both outputs (no string matching)
+        # Step 2: Llama compares both outputs (no string matching)
         # ---------------------------------------------------------------
-        comparison = await self._comparator.compare(gemini_result, qwen_result)
+        comparison = await self._comparator.compare(llama_result, qwen_result)
         logger.info(
-            f"[{request_id}] Gemini comparator | matched={comparison['matched']} | "
+            f"[{request_id}] Llama comparator | matched={comparison['matched']} | "
             f"confidence={comparison['confidence']}% | "
             f"reasoning: {comparison['reasoning'][:100]}"
         )
 
         # ---------------------------------------------------------------
-        # Step 3a: MATCH → always use Gemini (primary) as authoritative result
+        # Step 3a: MATCH → always use Llama (primary) as authoritative result
         # ---------------------------------------------------------------
         if comparison["matched"]:
-            # Gemini is primary — its result is the authoritative source on agreement.
-            # We still log Qwen's confidence for transparency.
-            final = dict(gemini_result)
-            final["source"] = "gemini"
+            # Llama is primary — its result is the authoritative source on agreement.
+            final = dict(llama_result)
+            final["source"] = "llama"
             logger.info(
-                f"[{request_id}] VLMs AGREED → returning Gemini (primary) result. "
+                f"[{request_id}] VLMs AGREED → returning Llama (primary) result. "
                 f"Qwen corroborated. Comparator confidence: {comparison['confidence']}%"
             )
 
@@ -120,15 +119,15 @@ class DiagnosisService:
                 f"[{request_id}] VLMs DISAGREED → invoking research Consensus API to arbitrate..."
             )
             try:
-                final = await self._consensus.arbitrate(gemini_result, qwen_result)
+                final = await self._consensus.arbitrate(llama_result, qwen_result)
             except RuntimeError as e:
-                # Fallback: if consensus API is unavailable, trust primary (Gemini)
+                # Fallback: if consensus API is unavailable, trust primary (Llama)
                 logger.error(
                     f"[{request_id}] Consensus API failed: {e}. "
-                    "Falling back to Gemini (primary) result."
+                    "Falling back to Llama (primary) result."
                 )
-                final = dict(gemini_result)
-                final["source"] = "gemini"
+                final = dict(llama_result)
+                final["source"] = "llama"
                 final["consensus_fallback"] = True
 
         # ---------------------------------------------------------------
@@ -139,8 +138,12 @@ class DiagnosisService:
         final["comparison_reasoning"] = comparison["reasoning"]
         final["chips"] = self._build_chips(final)
 
-        # Rename disease_name → disease to match frontend TypeScript type
+        # Dynamically extract and inject crop common name from disease/description
+        final["crop"] = self._resolve_crop_name(final.get("disease_name", ""), final.get("description", ""))
+
+        # Rename disease_name → disease and map description to text to match frontend TypeScript type
         final["disease"] = final.pop("disease_name", "Unknown Disease")
+        final["text"] = final.get("description", "No description provided.")
 
         return final
 
@@ -203,7 +206,7 @@ class DiagnosisService:
 
         # Source chip
         source_labels = {
-            "gemini": ("Gemini Primary", "chip-blue"),
+            "llama": ("Llama Primary", "chip-blue"),
             "qwen": ("Qwen Secondary", "chip-blue"),
             "consensus": ("Research Validated", "chip-green"),
         }
@@ -215,3 +218,25 @@ class DiagnosisService:
             chips.append({"t": "High Spread Risk", "c": "chip-red"})
 
         return chips
+
+    def _resolve_crop_name(self, disease: str, description: str) -> str:
+        """
+        Dynamically extracts the crop's common name from the disease or description
+        to ensure crop-level context is always available.
+        """
+        disease_lower = disease.lower()
+        desc_lower = description.lower()
+        
+        crop_keywords = ["rice", "wheat", "potato", "tomato", "cotton", "maize", "corn", "sugarcane", "onion", "mustard"]
+        
+        # Check disease name first
+        for crop in crop_keywords:
+            if crop in disease_lower:
+                return crop.capitalize()
+                
+        # Check description text next
+        for crop in crop_keywords:
+            if crop in desc_lower:
+                return crop.capitalize()
+                
+        return "Crop"

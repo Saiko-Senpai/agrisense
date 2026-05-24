@@ -22,6 +22,60 @@ _REQUIRED_DIAGNOSIS_FIELDS = {
 }
 
 
+def parse_markdown_fallback(text: str) -> dict[str, Any]:
+    """
+    Fallback parser when LLM outputs markdown or key-value format instead of JSON.
+    """
+    result = {}
+    
+    # Disease Name
+    disease_match = re.search(r"(?:disease\s*name|disease)\s*:\s*\**([^\n\*\r]+)", text, re.IGNORECASE)
+    if disease_match:
+        result["disease_name"] = disease_match.group(1).strip("* ").strip()
+        
+    # Pathogen
+    pathogen_match = re.search(r"(?:pathogen)\s*:\s*\**([^\n\*\r]+)", text, re.IGNORECASE)
+    if pathogen_match:
+        result["pathogen"] = pathogen_match.group(1).strip("* ").strip()
+        
+    # Confidence
+    confidence_match = re.search(r"(?:confidence)\s*:\s*\**(\d+)", text, re.IGNORECASE)
+    if confidence_match:
+        result["confidence"] = int(confidence_match.group(1))
+        
+    # Stage
+    stage_match = re.search(r"(?:stage)\s*:\s*\**([^\n\*\r]+)", text, re.IGNORECASE)
+    if stage_match:
+        result["stage"] = stage_match.group(1).strip("* ").strip()
+        
+    # Description
+    desc_match = re.search(r"(?:description)\s*:\s*\**([^\n\r]+)", text, re.IGNORECASE)
+    if desc_match:
+        result["description"] = desc_match.group(1).strip("* ").strip()
+
+    # Now extract lists for treatment and prevention
+    for field in ("treatment", "prevention"):
+        items = []
+        block_pattern = rf"(?:{field}|{field}s)\s*:\s*(.*?)(?=(?:\n\s*\*?\*?\w+\s*:\s*)|$)"
+        block_match = re.search(block_pattern, text, re.IGNORECASE | re.DOTALL)
+        if block_match:
+            block_text = block_match.group(1)
+            bullets = re.findall(r"(?:^|\n)\s*(?:\*|-|\d+\.)\s*(.*?)(?=\n\s*(?:\*|-|\d+\.)|$)", block_text)
+            for bullet in bullets:
+                b_cleaned = bullet.strip("* ").strip()
+                if b_cleaned:
+                    items.append(b_cleaned)
+            if not items:
+                lines = [line.strip() for line in block_text.split("\n") if line.strip()]
+                for line in lines:
+                    cleaned_line = line.strip("*- \t0123456789.")
+                    if cleaned_line:
+                        items.append(cleaned_line)
+        result[field] = items
+
+    return result
+
+
 def extract_json(text: str) -> dict[str, Any]:
     """
     Robustly extract a JSON object from a string.
@@ -31,9 +85,10 @@ def extract_json(text: str) -> dict[str, Any]:
     - JSON wrapped in markdown code fences (```json ... ```)
     - JSON embedded within explanatory text
     - Trailing commas (common LLM mistake)
+    - Markdown key-value fallback parser (if JSON parsing completely fails)
 
     Raises:
-        ValueError: If no valid JSON object can be extracted.
+        ValueError: If no valid JSON or structured metadata can be parsed.
     """
     if not text or not text.strip():
         raise ValueError("AI response is empty.")
@@ -58,6 +113,16 @@ def extract_json(text: str) -> dict[str, Any]:
             return json.loads(candidate)
         except json.JSONDecodeError as e:
             logger.warning(f"JSON parse failed on extracted block: {e}")
+
+    # 4. Fallback: Parse markdown key-value pairs
+    try:
+        parsed_md = parse_markdown_fallback(text)
+        # Verify that we extracted at least the disease name
+        if parsed_md.get("disease_name"):
+            logger.info("Successfully recovered structured disease data using markdown fallback parser.")
+            return parsed_md
+    except Exception as e:
+        logger.warning(f"Markdown fallback parsing failed: {e}")
 
     raise ValueError(
         f"Could not extract valid JSON from AI response. Raw text (first 300 chars): {text[:300]}"

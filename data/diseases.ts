@@ -25,6 +25,7 @@ export const diseaseResults: DiseaseResult[] = [
       { t: "Treatable", c: "chip-green" },
       { t: "Spread Risk: Medium", c: "chip-blue" },
     ],
+    crop: "Tomato",
   },
   {
     disease: "Late Blight",
@@ -50,6 +51,7 @@ export const diseaseResults: DiseaseResult[] = [
       { t: "Urgent Action", c: "chip-red" },
       { t: "High Spread Risk", c: "chip-blue" },
     ],
+    crop: "Potato",
   },
   {
     disease: "Powdery Mildew",
@@ -75,6 +77,7 @@ export const diseaseResults: DiseaseResult[] = [
       { t: "Good Prognosis", c: "chip-green" },
       { t: "Spread Risk: Low", c: "chip-blue" },
     ],
+    crop: "Rice",
   },
 ];
 

@@ -24,6 +24,7 @@ export interface DiseaseResult {
   treatment: string[];
   prevention: string[];
   chips: { t: string; c: string }[];
+  crop?: string;
 }
 
 export interface MarketPrice {

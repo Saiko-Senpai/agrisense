@@ -31,13 +31,13 @@ class ChatRequest(BaseModel):
     )
     crop_context: Optional[str] = Field(
         default=None,
-        max_length=100,
+        max_length=1000,
         description="Name of the crop currently under discussion (e.g. 'tomato', 'wheat')",
         examples=["tomato"],
     )
     disease_context: Optional[str] = Field(
         default=None,
-        max_length=200,
+        max_length=4000,
         description="Disease detected from a prior scan (e.g. 'Late Blight')",
         examples=["Late Blight"],
     )
@@ -69,3 +69,34 @@ class AnalyzeRequest(BaseModel):
         description="Optional user-provided crop name to assist analysis (e.g. 'potato')",
         examples=["potato"],
     )
+
+
+class WeatherMain(BaseModel):
+    temp: float = Field(..., description="Temperature in Celsius")
+    humidity: int = Field(..., description="Humidity percentage")
+    feels_like: float = Field(..., description="Feels like temperature in Celsius")
+    pressure: int = Field(..., description="Atmospheric pressure in hPa")
+
+
+class WeatherDesc(BaseModel):
+    description: str = Field(..., description="Weather description text")
+    icon: str = Field(..., description="Weather icon code")
+
+
+class WindInfo(BaseModel):
+    speed: float = Field(..., description="Wind speed in km/h or m/s")
+
+
+class WeatherDataInput(BaseModel):
+    name: str = Field(..., description="Location/City name")
+    main: WeatherMain = Field(..., description="Main weather metrics")
+    weather: list[WeatherDesc] = Field(..., description="Weather description list")
+    wind: WindInfo = Field(..., description="Wind information")
+
+
+class AdvisoryRequest(BaseModel):
+    """Request body for POST /advisory."""
+
+    crop_name: str = Field(..., description="Name of the selected crop", examples=["Rice"])
+    weather_data: WeatherDataInput = Field(..., description="Current weather data")
+

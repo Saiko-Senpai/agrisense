@@ -1,8 +1,8 @@
 """
-utils/prompts.py — Centralized prompt engineering for Gemini and the chatbot.
+utils/prompts.py — Centralized prompt engineering for Llama and the chatbot.
 
 Contains:
-- IMAGE_ANALYSIS_PROMPT: Shared by both Gemini (primary) and Qwen (secondary)
+- IMAGE_ANALYSIS_PROMPT: Shared by both Llama (primary) and Qwen (secondary)
   for structured JSON disease diagnosis.
 - build_chatbot_system_prompt: Builds the agriculture-only system prompt for
   the AgriSense chatbot with optional crop/disease context injection.
@@ -12,7 +12,7 @@ Note: Consensus arbitration is handled by an external research API (no prompt ne
 
 
 # ---------------------------------------------------------------------------
-# IMAGE ANALYSIS PROMPT (shared by both Gemini and Qwen)
+# IMAGE ANALYSIS PROMPT (shared by both Llama and Qwen)
 # ---------------------------------------------------------------------------
 IMAGE_ANALYSIS_PROMPT = """You are an expert agricultural pathologist AI with deep knowledge of crop diseases across all major crops (rice, wheat, tomato, potato, maize, cotton, sugarcane, onion, and others).
 
@@ -48,11 +48,11 @@ Return this exact JSON structure:
 
 # ---------------------------------------------------------------------------
 # COMPARISON PROMPT
-# Used by comparator_service.py — Gemini determines if both VLMs agree
+# Used by comparator_service.py — Llama determines if both VLMs agree
 # ---------------------------------------------------------------------------
-def build_comparison_prompt(gemini_result: dict, qwen_result: dict) -> str:
+def build_comparison_prompt(llama_result: dict, qwen_result: dict) -> str:
     """
-    Instruct Gemini to act as an expert plant pathologist and evaluate
+    Instruct Llama to act as an expert plant pathologist and evaluate
     whether the two VLM diagnoses are describing the same disease.
 
     This is intentionally reasoning-based — not string matching — so it
@@ -61,11 +61,11 @@ def build_comparison_prompt(gemini_result: dict, qwen_result: dict) -> str:
     """
     return f"""You are an expert plant pathologist. Two AI Vision models independently analyzed the same crop image and produced the following disease diagnoses.
 
-PRIMARY MODEL (Gemini) diagnosed:
-  Disease: {gemini_result.get("disease_name", "Unknown")}
-  Pathogen: {gemini_result.get("pathogen", "Unknown")}
-  Stage: {gemini_result.get("stage", "Unknown")}
-  Description: {gemini_result.get("description", "")}
+PRIMARY MODEL (Llama) diagnosed:
+  Disease: {llama_result.get("disease_name", "Unknown")}
+  Pathogen: {llama_result.get("pathogen", "Unknown")}
+  Stage: {llama_result.get("stage", "Unknown")}
+  Description: {llama_result.get("description", "")}
 
 SECONDARY MODEL (Qwen) diagnosed:
   Disease: {qwen_result.get("disease_name", "Unknown")}
