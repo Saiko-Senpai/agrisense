@@ -1,0 +1,68 @@
+import { MarketPrice } from "@/types";
+
+export const marketPrices: MarketPrice[] = [
+  {
+    crop: "Rice",
+    emoji: "🌾",
+    price: 2450,
+    change: 2.4,
+    mandi: "Hapur Mandi, UP",
+    unit: "/quintal",
+  },
+  {
+    crop: "Wheat",
+    emoji: "🌻",
+    price: 2275,
+    change: -1.2,
+    mandi: "Ludhiana Mandi, Punjab",
+    unit: "/quintal",
+  },
+  {
+    crop: "Potato",
+    emoji: "🥔",
+    price: 1890,
+    change: 5.7,
+    mandi: "Agra Mandi, UP",
+    unit: "/quintal",
+  },
+  {
+    crop: "Tomato",
+    emoji: "🍅",
+    price: 3200,
+    change: 12.3,
+    mandi: "Nasik Mandi, MH",
+    unit: "/quintal",
+  },
+  {
+    crop: "Cotton",
+    emoji: "🌸",
+    price: 7800,
+    change: -2.1,
+    mandi: "Akola Mandi, MH",
+    unit: "/quintal",
+  },
+  {
+    crop: "Maize",
+    emoji: "🌽",
+    price: 1980,
+    change: 1.8,
+    mandi: "Dharwad Mandi, KA",
+    unit: "/quintal",
+  },
+  {
+    crop: "Onion",
+    emoji: "🧅",
+    price: 2100,
+    change: -4.5,
+    mandi: "Lasalgaon Mandi, MH",
+    unit: "/quintal",
+  },
+  {
+    crop: "Chili",
+    emoji: "🌶️",
+    price: 15500,
+    change: 8.9,
+    mandi: "Guntur Mandi, AP",
+    unit: "/quintal",
+  },
+];

@@ -1,0 +1,51 @@
+{
+  "nav": {
+    "home": "Home",
+    "cropLibrary": "Crop Library",
+    "weather": "Weather Advice",
+    "assistant": "AI Assistant",
+    "about": "About"
+  },
+  "hero": {
+    "badge": "AI-Powered Farming Intelligence",
+    "title": "AI Powered Crop Disease Detection",
+    "subtitle": "Upload a photo of your crop and get instant AI diagnosis, treatment plans, and expert farming advice — in seconds.",
+    "scanBtn": "Scan Your Crop",
+    "browseBtn": "Browse Crops"
+  },
+  "upload": {
+    "title": "Upload Crop Image",
+    "subtitle": "Take a photo or upload from your device to detect diseases instantly",
+    "capture": "Capture Photo",
+    "upload": "Upload Image",
+    "analyzeBtn": "Analyze Now",
+    "dragDrop": "or drag and drop here"
+  },
+  "pipeline": {
+    "title": "AI Analysis Pipeline",
+    "steps": ["Image Upload", "Gemini 2.5 Flash", "Qwen 2.5 Instruct 7B", "Consensus Verification", "Final Diagnosis"]
+  },
+  "crops": {
+    "title": "Explore Crop Library",
+    "subtitle": "Click any crop for detailed growing guides, disease prevention & smart farming tips"
+  },
+  "weather": {
+    "title": "Live Weather Advisory",
+    "subtitle": "Real-time weather data with crop-specific farming recommendations",
+    "selectCrop": "Select Crop"
+  },
+  "market": {
+    "title": "Live Mandi Prices",
+    "subtitle": "Real-time crop market prices from major mandis across India"
+  },
+  "chatbot": {
+    "title": "AgriSense AI Farming Assistant",
+    "subtitle": "Ask anything about crops, diseases, fertilizers, and farming",
+    "placeholder": "Ask about crops, diseases, irrigation...",
+    "online": "Online — Agriculture Expert"
+  },
+  "about": {
+    "title": "About AgriSense",
+    "subtitle": "AI-powered crop disease detection and smart farming platform built for Indian farmers. Free, fast, and farmer-friendly."
+  }
+}
